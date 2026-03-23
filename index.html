@@ -90,6 +90,7 @@
   <!-- 新資料載入：支援無限賽事擴充！ -->
   <script src="2025_tpe_data.js"></script>
   <script src="2026_chartered_tpe_data.js"></script>
+  <script src="2026_freeway_tpe_data.js"></script>
 
   <!-- 區塊 1：互動式 histogram -->
   <h2>1. 分組完賽時間分布 (histogram)</h2>
@@ -107,6 +108,7 @@
     <div id="chartContainer">
       <canvas id="histCanvas"></canvas>
     </div>
+    <div id="chartStatus" class="result-block" style="display:none;"></div>
   </div>
 
   <!-- 區塊 2：輸入時間 → 查總場 & 性別 & 細部分組排名/PR -->
@@ -174,12 +176,25 @@
     return Object.keys(window.marathonData).map(id => window.marathonData[id].metadata);
   }
 
+  function getSortedEvents() {
+    return getAllEvents().sort((a, b) => (a.event_date || "").localeCompare(b.event_date || ""));
+  }
+
   function getEventData(eventId) {
     return window.marathonData[eventId];
   }
 
   function getEventIdFromName(eventName) {
     return getAllEvents().find(e => e.event_name === eventName)?.event_id;
+  }
+
+  function eventHasBins(eventId) {
+    return Object.keys(getEventData(eventId)?.binsAndPr || {}).length > 0;
+  }
+
+  function getPendingEventMessage(eventId) {
+    const metadata = getEventData(eventId)?.metadata || {};
+    return metadata.notes || "此賽事已加入 repo，但完整成績資料仍待匯入。";
   }
 
   // ✅ 修復：正確解析完整 key
@@ -293,7 +308,7 @@
 
   // ---------- 🎛️ 選擇器填充 ----------
   function fillEventSelects() {
-    const events = getAllEvents();
+    const events = getSortedEvents();
     
     // 只填充賽事選單
     ["eventSelect", "eventForPr", "eventForPrReverse"].forEach(selectId => {
@@ -324,11 +339,14 @@
   function updateRaceSelect(eventName, selectId) {
     const raceSelect = document.getElementById(selectId);
     if (!raceSelect) return;
-    
+
     raceSelect.innerHTML = "";
+    const eventId = getEventIdFromName(eventName);
+    const metadataRaceTypes = getEventData(eventId)?.metadata?.race_types || [];
     const raceTypes = Object.keys(raceHierarchy[eventName] || {}).sort();
-    
-    raceTypes.forEach(rt => {
+    const finalRaceTypes = raceTypes.length ? raceTypes : metadataRaceTypes;
+
+    finalRaceTypes.forEach(rt => {
       const opt = document.createElement("option");
       opt.value = rt;
       opt.textContent = rt;
@@ -339,10 +357,11 @@
   function updateGroupSelect(eventName, raceType, selectId) {
     const groupSelect = document.getElementById(selectId);
     if (!groupSelect) return;
-    
+
     groupSelect.innerHTML = "";
-    const groups = raceHierarchy[eventName]?.[raceType] || [];
-    
+    const eventId = getEventIdFromName(eventName);
+    const groups = raceHierarchy[eventName]?.[raceType] || (eventHasBins(eventId) ? [] : ["ALL"]);
+
     groups.forEach(g => {
       const opt = document.createElement("option");
       opt.value = g;
@@ -360,24 +379,36 @@
   
   // 📊 Histogram
   function drawHistogram() {
+    const chartStatus = document.getElementById("chartStatus");
     const eventName = document.getElementById("eventSelect").value;
     const raceType = document.getElementById("raceSelect").value;
     const group = document.getElementById("groupSelect").value;
-    
-    if (!raceType || !group) {
-      alert("請先選擇賽別和分組");
-      return;
-    }
-    
     const eventSelect = document.getElementById("eventSelect");
     const eventId = eventSelect.selectedOptions[0].dataset.eventId;
+
+    chartStatus.style.display = "none";
+    chartStatus.textContent = "";
+
+    if (!eventHasBins(eventId)) {
+      if (histChart) histChart.destroy();
+      chartStatus.style.display = "block";
+      chartStatus.textContent = `📦 ${eventName}：${getPendingEventMessage(eventId)}`;
+      return;
+    }
+
+    if (!raceType || !group) {
+      chartStatus.style.display = "block";
+      chartStatus.textContent = "請先選擇賽別和分組。";
+      return;
+    }
+
     const fullKey = getFullKey(eventId, raceType, group);
-    
     const eventData = getEventData(eventId);
     const obj = eventData?.binsAndPr?.[fullKey];
-    
+
     if (!obj?.histogram_5min) {
-      alert(`找不到資料：${eventName} / ${raceType} / ${group}`);
+      chartStatus.style.display = "block";
+      chartStatus.textContent = `找不到資料：${eventName} / ${raceType} / ${group}`;
       return;
     }
     
@@ -441,6 +472,11 @@
     const eventData = getEventData(eventId);
     const resultArea = document.getElementById("prResultArea");
     resultArea.innerHTML = "";
+
+    if (!eventHasBins(eventId)) {
+      resultArea.innerHTML = `<div class="result-block">📦 ${eventName}：${getPendingEventMessage(eventId)}</div>`;
+      return;
+    }
 
     if (!eventData?.binsAndPr) {
       resultArea.innerHTML = `<div class="result-block">找不到賽事資料</div>`;
@@ -649,9 +685,15 @@
     const eventId = document.getElementById("eventForPrReverse").selectedOptions[0].dataset.eventId;
     const fullKey = getFullKey(eventId, raceType, group);
     const eventData = getEventData(eventId);
-    const obj = eventData.binsAndPr[fullKey];
     const resultArea = document.getElementById("prReverseResultArea");
     resultArea.innerHTML = "";
+
+    if (!eventHasBins(eventId)) {
+      resultArea.innerHTML = `<div class="result-block">📦 ${eventName}：${getPendingEventMessage(eventId)}</div>`;
+      return;
+    }
+
+    const obj = eventData.binsAndPr[fullKey];
 
     if (!obj?.sorted_seconds) {
       resultArea.innerHTML = `<div class="result-block">找不到 ${fullKey} 的資料</div>`;
@@ -707,19 +749,20 @@
   }
 
   function setDefaultForAllBlocks() {
-    const events = getAllEvents();
+    const events = getSortedEvents();
     if (!events.length) return;
-    
-    const latestEventName = events[events.length - 1].event_name;
-    const latestEventId = events[events.length - 1].event_id;
-    
+
+    const defaultEvent = [...events].reverse().find(event => eventHasBins(event.event_id)) || events[events.length - 1];
+    const latestEventName = defaultEvent.event_name;
+    const latestEventId = defaultEvent.event_id;
+
     // Block 1: Histogram
     setDefaultForBlock1(latestEventName, latestEventId);
-    
+
     // Block 2: PR查詢
     setDefaultForBlock2(latestEventName, latestEventId);
-    
-    // Block 3: PR反查  
+
+    // Block 3: PR反查
     setDefaultForBlock3(latestEventName, latestEventId);
   }
 
@@ -773,6 +816,8 @@
   document.getElementById("eventSelect").addEventListener("change", function(e) {
     const eventName = e.target.value;
     updateRaceSelect(eventName, "raceSelect");
+    const raceType = document.getElementById("raceSelect").value;
+    updateGroupSelect(eventName, raceType, "groupSelect");
     drawHistogram(); // 自動繪圖
   });
 

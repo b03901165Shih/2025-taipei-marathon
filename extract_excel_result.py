@@ -1,7 +1,9 @@
+import argparse
 import math
 import json
 from collections import defaultdict
 from datetime import datetime
+from pathlib import Path
 import pandas as pd
 
 
@@ -166,7 +168,7 @@ def build_sorted_seconds(group_seconds: dict[tuple[str, str], list[int]]) -> dic
 # ========= 🚀 擴充性最佳方案：Metadata 結構 =========
 def create_metadata(event_config: dict) -> dict:
     """建立標準化 metadata"""
-    return {
+    metadata = {
         "event_id": event_config["id"],
         "event_name": event_config["name"],
         "event_date": event_config.get("date", ""),
@@ -180,6 +182,12 @@ def create_metadata(event_config: dict) -> dict:
             "time_format": "HH:MM:SS"
         }
     }
+
+    for optional_key in ("source_url", "status", "notes"):
+        if optional_key in event_config:
+            metadata[optional_key] = event_config[optional_key]
+
+    return metadata
 
 def build_data(excel_path: str, event_config: dict) -> tuple[dict, dict, dict]:
     """建立完整資料集：combined + summary + metadata"""
@@ -235,39 +243,45 @@ def output_event_js(combined: dict, metadata: dict, js_filename: str):
     print(f"   📅 {metadata['event_name']}")
     print(f"   👥 {total_people:,}人 / {total_races}賽別 / {total_keys}分組")
 
+# ========= 賽事設定檔 =========
+DEFAULT_EVENT_CONFIG_PATH = Path(__file__).with_name("events_config.json")
+
+
+def load_event_configs(config_path: str | Path = DEFAULT_EVENT_CONFIG_PATH) -> list[dict]:
+    """從 JSON 設定檔載入賽事設定。"""
+    path = Path(config_path)
+    with path.open("r", encoding="utf-8") as f:
+        payload = json.load(f)
+
+    events = payload.get("events", payload)
+    if not isinstance(events, list):
+        raise ValueError("賽事設定格式錯誤：events 必須是 list")
+
+    required_keys = {"id", "name", "excel", "date", "race_types"}
+    for event in events:
+        missing = required_keys - set(event.keys())
+        if missing:
+            raise ValueError(f"賽事設定缺少欄位 {missing}: {event}")
+
+    return events
+
+
 # ========= 🎯 主程式：支援多賽事擴充 =========
 def main():
     """支援未來無限擴充新賽事！"""
-    
-    # 🌟 賽事配置表（未來加新賽事只要加一列！）
-    EVENTS = [
-        {
-            "id": "2025_tpe",
-            "name": "2025台北馬拉松",
-            "excel": "2025_台北馬拉松_完整成績.xlsx",
-            "date": "2025-12-21",
-            "race_types": ["MA", "HM"],
-            "total_count": 0  # 會自動計算
-        },
-        {
-            "id": "2026_chartered_tpe", 
-            "name": "2026渣打台北公益馬拉松",
-            "excel": "2026_渣打台北馬拉松_完整成績.xlsx",
-            "date": "2026-01-18",
-            "race_types": ["全程馬拉松(42.195KM)", "半程馬拉松(21.0975km)", "11KM"],
-            "total_count": 0
-        }
-        # 未來加新賽事：
-        # {
-        #     "id": "2027_tpe_full", 
-        #     "name": "2027台北馬拉松",
-        #     "excel": "2027_xxx.xlsx",
-        #     "date": "2027-12-19",
-        #     "race_types": ["MA", "HM"],
-        #     "total_count": 0
-        # }
-    ]
-    
+
+    parser = argparse.ArgumentParser(description="根據 Excel 成績檔生成前端資料檔")
+    parser.add_argument(
+        "--config",
+        default=str(DEFAULT_EVENT_CONFIG_PATH),
+        help="賽事設定 JSON 路徑（預設: events_config.json）",
+    )
+    args = parser.parse_args()
+
+    EVENTS = load_event_configs(args.config)
+
+    # 未來加新賽事：直接在 events_config.json 新增一筆即可。
+
     for event in EVENTS:
         try:
             excel_path = event["excel"]
