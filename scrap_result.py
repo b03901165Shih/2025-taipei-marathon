@@ -13,7 +13,11 @@ from selenium.webdriver.chrome.options import Options
 # Selenium / 瀏覽器設定
 # --------------------------------------------------
 
-BASE_URL = "https://www.bravelog.tw/contest/rank/2026011101"
+#BASE_URL = "https://www.bravelog.tw/contest/rank/2026011101" # 渣打馬
+#output_file = "2026_渣打台北馬拉松_完整成績.xlsx"
+
+BASE_URL = "https://www.bravelog.tw/contest/rank/2026030801" # 國道馬
+output_file = "2026_南山人壽臺北國道馬拉松_完整成績.xlsx"
 
 chrome_options = Options()
 chrome_options.add_argument("--headless=new")
@@ -896,7 +900,6 @@ def main():
         df["總排名"] = range(1, len(df) + 1)
 
         # 儲存到 Excel
-        output_file = "2026_渣打台北馬拉松_完整成績.xlsx"
         with pd.ExcelWriter(output_file, engine="openpyxl") as writer:
             df.to_excel(writer, sheet_name="完整成績", index=False)
 

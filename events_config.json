@@ -1,0 +1,31 @@
+{
+  "events": [
+    {
+      "id": "2025_tpe",
+      "name": "2025台北馬拉松",
+      "excel": "2025_台北馬拉松_完整成績.xlsx",
+      "date": "2025-12-21",
+      "race_types": ["MA", "HM"],
+      "total_count": 0,
+      "source_url": "https://www.bravelog.tw/contest/rank/2025122101"
+    },
+    {
+      "id": "2026_chartered_tpe",
+      "name": "2026渣打台北公益馬拉松",
+      "excel": "2026_渣打台北馬拉松_完整成績.xlsx",
+      "date": "2026-01-18",
+      "race_types": ["全程馬拉松(42.195KM)", "半程馬拉松(21.0975km)", "11KM"],
+      "total_count": 0,
+      "source_url": "https://www.bravelog.tw/contest/rank/2026011101"
+    },
+    {
+      "id": "2026_freeway_tpe",
+      "name": "2026南山人壽臺北國道馬拉松",
+      "excel": "2026_南山人壽臺北國道馬拉松_完整成績.xlsx",
+      "date": "2026-03-08",
+      "race_types": ["MA", "HM"],
+      "total_count": 0,
+      "source_url": "https://www.bravelog.tw/contest/rank/2026030801"
+    }
+  ]
+}
