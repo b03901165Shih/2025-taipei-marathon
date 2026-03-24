@@ -1,6 +1,6 @@
 # 2026 台灣馬拉松名次統計工具
 
-## Overview [**網頁連結**](https://b03901165shih.github.io/tw-marathon-stats/)
+## Overview [**網頁連結**](https://b03901165shih.github.io/2026-taiwan-marathon-stats/)
 **包含2025台北馬、2026渣打馬、2026國道馬。 輸入時間查排名/名次百分比，或輸入百分比查對應時間！** 📊
 
 > 目前以大會時間為準 (非淨時間的成績)，會與官方提供排名有些許落差
