@@ -1,5 +1,5 @@
 {
-  "events": [
+  "past_events": [
     {
       "id": "2025_tpe",
       "name": "2025台北馬拉松",
@@ -26,6 +26,17 @@
       "race_types": ["MA", "HM"],
       "total_count": 0,
       "source_url": "https://www.bravelog.tw/contest/rank/2026030801"
+    }
+  ],
+  "events": [
+    {
+      "id": "2026_puma_night_run",
+      "name": "2026PUMA螢光夜跑",
+      "excel": "2026_PUMA螢光夜跑_完整成績.xlsx",
+      "date": "2026-03-08",
+      "race_types": ["EliteRun菁英半馬組", "GlowRun螢光挑戰組"],
+      "total_count": 0,
+      "source_url": "https://www.bravelog.tw/contest/rank/2026032802"
     }
   ]
 }
