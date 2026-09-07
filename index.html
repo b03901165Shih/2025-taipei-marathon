@@ -48,7 +48,7 @@
 
     th { 
       font-weight: 600; 
-      font-size: 1px; 
+      font-size: 17px; 
       color: #1f2937; 
       background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
       border-bottom: 2px solid #e2e8f0;
@@ -92,6 +92,9 @@
   <script src="2026_chartered_tpe_data.js"></script>
   <script src="2026_freeway_tpe_data.js"></script>
   <script src="2026_puma_night_run_data.js"></script>
+  <script src="2026_panasonic_tpe_data.js"></script>
+  <script src="2026_nat_geo_run_data.js"></script>
+  
 
   <!-- 區塊 1：互動式 histogram -->
   <h2>1. 分組完賽時間分布 (histogram)</h2>
@@ -162,6 +165,30 @@
     </div>
 
     <div id="prReverseResultArea"></div>
+  </div>
+
+  <!-- 區塊 4：跨賽事比較 -->
+  <h2>4. 同一時間跨賽事排名 / PR 比較</h2>
+  <div class="card">
+    <div class="row">
+      <div class="label">參考賽事：</div>
+      <select id="referenceEventSelect"></select>
+
+      <div class="label">參考賽別：</div>
+      <select id="referenceRaceSelect"></select>
+    </div>
+
+    <div class="row">
+      <div class="label">完賽時間：</div>
+      <div class="time-input-group">
+        <input id="compareHInput" type="number" min="0" max="23" placeholder="HH"> :
+        <input id="compareMInput" type="number" min="0" max="59" placeholder="MM"> :
+        <input id="compareSInput" type="number" min="0" max="59" placeholder="SS">
+      </div>
+      <button id="btnCompareEvents">比較所有賽事</button>
+    </div>
+
+    <div id="compareEventsResultArea"></div>
   </div>
 
 </div>
@@ -271,6 +298,190 @@
       }
     }
     return lo;
+  }
+
+  function parseCompareTimeInputs() {
+    const h = parseInt(document.getElementById("compareHInput").value, 10);
+    const m = parseInt(document.getElementById("compareMInput").value, 10);
+    const s = parseInt(document.getElementById("compareSInput").value, 10);
+    if (Number.isNaN(h) || Number.isNaN(m) || Number.isNaN(s) ||
+        h < 0 || h > 23 || m < 0 || m > 59 || s < 0 || s > 59) {
+      alert("請輸入完整且有效的 HH:MM:SS");
+      return null;
+    }
+    return timeToSeconds(h, m, s);
+  }
+
+  function getRaceTypesForEvent(eventId) {
+    const data = getEventData(eventId);
+    const raceTypes = new Set();
+    Object.keys(data?.binsAndPr || {}).forEach(key => {
+      const parsed = parseFullKey(key);
+      if (parsed?.eventId === eventId) raceTypes.add(parsed.raceType);
+    });
+    return [...raceTypes];
+  }
+
+  function getGenderSeconds(eventId, raceType, gender) {
+    const data = getEventData(eventId);
+    const seconds = [];
+    Object.entries(data?.binsAndPr || {}).forEach(([key, obj]) => {
+      const parsed = parseFullKey(key);
+      if (!parsed || parsed.eventId !== eventId || parsed.raceType !== raceType) return;
+      if (parsed.group === "ALL" || !parsed.group.includes(gender)) return;
+      if (Array.isArray(obj?.sorted_seconds)) seconds.push(...obj.sorted_seconds);
+    });
+    return seconds.sort((a, b) => a - b);
+  }
+
+  function getMetrics(sortedSeconds, sec) {
+    if (!sortedSeconds?.length) return null;
+    const index = lowerBound(sortedSeconds, sec);
+    const total = sortedSeconds.length;
+    const rank = index + 1;
+    const slower = Math.max(0, total - index);
+    return { rank, total, pr: (slower / total) * 100 };
+  }
+
+  function getRaceMetrics(eventId, raceType, sec) {
+    const allSeconds = getEventData(eventId)?.binsAndPr?.[
+      getFullKey(eventId, raceType, "ALL")
+    ]?.sorted_seconds;
+    return {
+      all: getMetrics(allSeconds, sec),
+      male: getMetrics(getGenderSeconds(eventId, raceType, "男"), sec),
+      female: getMetrics(getGenderSeconds(eventId, raceType, "女"), sec),
+    };
+  }
+
+  function formatRank(metric) {
+    return metric ? `${metric.rank.toLocaleString()} / ${metric.total.toLocaleString()}` : "—";
+  }
+
+  function formatPr(metric) {
+    return metric ? `${metric.pr.toFixed(2)}%` : "—";
+  }
+
+  function fillReferenceEventSelect() {
+    const eventSelect = document.getElementById("referenceEventSelect");
+    eventSelect.innerHTML = "";
+    getSortedEvents().filter(event => eventHasBins(event.event_id)).forEach(event => {
+      const option = document.createElement("option");
+      option.value = event.event_name;
+      option.textContent = event.event_name;
+      option.dataset.eventId = event.event_id;
+      eventSelect.appendChild(option);
+    });
+  }
+
+  function updateReferenceRaceSelect() {
+    const eventName = document.getElementById("referenceEventSelect").value;
+    updateRaceSelect(eventName, "referenceRaceSelect");
+  }
+
+  function compareEvents() {
+    const sec = parseCompareTimeInputs();
+    if (sec == null) return;
+
+    const referenceEventId = getEventIdFromName(
+      document.getElementById("referenceEventSelect").value
+    );
+    const referenceRaceType = document.getElementById("referenceRaceSelect").value;
+    const resultArea = document.getElementById("compareEventsResultArea");
+    resultArea.innerHTML = "";
+
+    const referenceMetrics = getRaceMetrics(referenceEventId, referenceRaceType, sec);
+    if (!referenceMetrics.all) {
+      resultArea.innerHTML = '<div class="result-block">參考賽事／賽別沒有完整成績資料。</div>';
+      return;
+    }
+
+    const referencePr = referenceMetrics.all.pr;
+
+    const tableWrap = document.createElement("div");
+    tableWrap.style.overflowX = "auto";
+    const table = document.createElement("table");
+    table.style.cssText = "width:100%;border-collapse:collapse;margin-top:15px;font-size:15px;background:#fff;";
+    table.innerHTML = `
+      <thead style="display:table-header-group;background:#e2e8f0;color:#111827;">
+        <tr style="display:table-row;">
+          <th scope="col">賽事</th><th scope="col">賽別</th>
+          <th scope="col">總場排名</th><th scope="col">總場 PR</th>
+          <th scope="col">男性排名</th><th scope="col">男性 PR</th>
+          <th scope="col">女性排名</th><th scope="col">女性 PR</th>
+        </tr>
+      </thead><tbody></tbody>`;
+    const tbody = table.querySelector("tbody");
+
+    getSortedEvents().filter(event => eventHasBins(event.event_id)).forEach(event => {
+      let selectedRaceType = referenceRaceType;
+      let metrics;
+
+      if (event.event_id === referenceEventId) {
+        metrics = referenceMetrics;
+      } else {
+        const candidates = getRaceTypesForEvent(event.event_id)
+          .map(raceType => ({ raceType, metrics: getRaceMetrics(event.event_id, raceType, sec) }))
+          .filter(candidate => candidate.metrics.all);
+        if (!candidates.length) return;
+        candidates.sort((a, b) => {
+          const aPr = a.metrics.all.pr;
+          const bPr = b.metrics.all.pr;
+          return Math.abs(aPr - referencePr) - Math.abs(bPr - referencePr);
+        });
+        selectedRaceType = candidates[0].raceType;
+        metrics = candidates[0].metrics;
+      }
+
+      appendCompareRow(tbody, event, selectedRaceType, sec);
+    });
+    table.querySelectorAll("th").forEach(cell => {
+      cell.style.cssText = `
+        display: table-cell;
+        padding: 10px;
+        background: #e2e8f0;
+        border-bottom: 2px solid #94a3b8;
+        text-align: center;
+        white-space: nowrap;
+        font-weight: 700;
+        font-size: 15px;
+        color: #111827;
+      `;
+    });
+    tableWrap.appendChild(table);
+    resultArea.appendChild(tableWrap);
+  }
+
+  function appendCompareRow(tbody, event, raceType, sec) {
+    const metrics = getRaceMetrics(event.event_id, raceType, sec);
+    const row = document.createElement("tr");
+    const raceOptions = getRaceTypesForEvent(event.event_id)
+      .map(type => `<option value="${type}" ${type === raceType ? "selected" : ""}>${type}</option>`)
+      .join("");
+    row.innerHTML = `
+      <td>${event.event_name}</td>
+      <td><select class="compare-race-select" data-event-id="${event.event_id}">${raceOptions}</select></td>
+      <td>${formatRank(metrics.all)}</td><td>${formatPr(metrics.all)}</td>
+      <td>${formatRank(metrics.male)}</td><td>${formatPr(metrics.male)}</td>
+      <td>${formatRank(metrics.female)}</td><td>${formatPr(metrics.female)}</td>`;
+    row.querySelectorAll("td").forEach(cell => {
+      cell.style.cssText = "padding:9px 10px;border-bottom:1px solid #e5e7eb;text-align:center;white-space:nowrap;";
+    });
+    row.firstElementChild.style.textAlign = "left";
+    const raceSelect = row.querySelector(".compare-race-select");
+    raceSelect.addEventListener("change", () => updateCompareRow(row, event.event_id, raceSelect.value, sec));
+    tbody.appendChild(row);
+  }
+
+  function updateCompareRow(row, eventId, raceType, sec) {
+    const metrics = getRaceMetrics(eventId, raceType, sec);
+    const cells = row.querySelectorAll("td");
+    cells[2].textContent = formatRank(metrics.all);
+    cells[3].textContent = formatPr(metrics.all);
+    cells[4].textContent = formatRank(metrics.male);
+    cells[5].textContent = formatPr(metrics.male);
+    cells[6].textContent = formatRank(metrics.female);
+    cells[7].textContent = formatPr(metrics.female);
   }
 
   // ---------- 🏗️ 自動建立階層結構 ----------
@@ -742,6 +953,8 @@
     console.log("📊 載入賽事：", getAllEvents().map(e => e.event_name));
     buildRaceHierarchy();
     fillEventSelects();
+    fillReferenceEventSelect();
+    updateReferenceRaceSelect();
       
     // 🔥 設定3個區塊預設值
     setDefaultForAllBlocks();
@@ -853,6 +1066,9 @@
     updateGroupSelect(eventName, e.target.value, "groupForPrReverse");
   });
   document.getElementById("btnCheckPrReverse").addEventListener("click", lookupTimeForPr);
+
+  document.getElementById("referenceEventSelect").addEventListener("change", updateReferenceRaceSelect);
+  document.getElementById("btnCompareEvents").addEventListener("click", compareEvents);
 
 
 

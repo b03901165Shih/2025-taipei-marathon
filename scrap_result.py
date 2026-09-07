@@ -3,11 +3,20 @@ from bs4 import BeautifulSoup
 import pandas as pd
 import time
 import re
+import sys
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
+
+
+# Windows 傳統主控台可能使用 CP950，無法輸出程式內的 emoji。
+# 明確使用 UTF-8，避免除錯訊息本身讓爬蟲中止。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 # --------------------------------------------------
 # Selenium / 瀏覽器設定
@@ -17,10 +26,13 @@ from selenium.webdriver.chrome.options import Options
 #output_file = "2026_渣打台北馬拉松_完整成績.xlsx"
 
 #BASE_URL = "https://www.bravelog.tw/contest/rank/2026030801" # 國道馬
-#output_file = "2026_南山人壽臺北國道馬拉松_完整成績.xlsx"
 
-BASE_URL = "https://www.bravelog.tw/contest/rank/2026032802" # PUMA螢光夜跑
-output_file = "2026_PUMA螢光夜跑_完整成績.xlsx"
+#BASE_URL = "https://www.bravelog.tw/contest/rank/2026090601" #PANASONIC
+
+BASE_URL = "https://www.bravelog.tw/contest/rank/2026042601" # 2026國家地理路跑
+
+
+output_file = "2026國家地理路跑_完整成績.xlsx"
 
 chrome_options = Options()
 chrome_options.add_argument("--headless=new")
@@ -75,6 +87,25 @@ def get_available_race_types(driver: webdriver.Chrome) -> list:
     """
     try:
         wait = WebDriverWait(driver, 10)
+
+        # 優先使用原生 select；它有穩定的 name 屬性，且可處理只有一個
+        # 賽別的比賽。舊邏輯以「至少兩項／四位數 value」推測選單，會漏掉
+        # 例如只有 10K（value=1818）的頁面。
+        native_select = wait.until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, 'select[name="raceId"]'))
+        )
+        race_types = []
+        for option in native_select.find_elements(By.CSS_SELECTOR, "option"):
+            # 原生 select 在 BraveLog 上是 display:none；對隱藏 option 使用
+            # textContent 比 Selenium 的 .text 穩定。
+            name = (option.get_attribute("textContent") or "").strip()
+            value = option.get_attribute("value") or ""
+            if name and value:
+                race_types.append((name, name, value))
+
+        if race_types:
+            print(f"✅ 動態獲取到 {len(race_types)} 個賽事類型：{[rt[0] for rt in race_types]}")
+            return race_types
         
         # 先等所有 nice-select 都出現
         selects = wait.until(
@@ -176,6 +207,21 @@ def get_available_groups(driver: webdriver.Chrome) -> list:
     """
     try:
         wait = WebDriverWait(driver, 10)
+
+        # 直接由原生 group select 取得選項，避免依 data-value 格式猜測。
+        native_select = wait.until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, 'select[name="group"]'))
+        )
+        groups = []
+        for option in native_select.find_elements(By.CSS_SELECTOR, "option"):
+            name = (option.get_attribute("textContent") or "").strip()
+            value = option.get_attribute("value") or ""
+            if name and value and name != "年齡分組":
+                groups.append((name, value))
+
+        if groups:
+            print(f"✅ 動態獲取到 {len(groups)} 個分組：{[group[0] for group in groups]}")
+            return groups
         
         # 先等所有 nice-select 都出現
         try:
@@ -381,6 +427,51 @@ def switch_race_type(driver: webdriver.Chrome, race_type_value: str, data_value:
     try:
         wait = WebDriverWait(driver, 10)
 
+        # 以原生 select 的 name 精準定位對應的 nice-select，不再以選項數量
+        # 或 value 位數判斷賽別選單。
+        native_select = wait.until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, 'select[name="raceId"]'))
+        )
+
+        # 單一賽別頁面一開始就已選好，重點擊會讓 BraveLog 重新渲染選單，
+        # 進而造成 Selenium 的 stale element reference。
+        selected_value = native_select.get_attribute("value") or ""
+        if data_value and selected_value == data_value:
+            print(f"   ✅ 已是目前賽別：{race_type_value}")
+            return True
+
+        parent = native_select.find_element(By.XPATH, "./..")
+        select_root = parent.find_element(By.CSS_SELECTOR, "div.nice-select")
+        options = select_root.find_elements(By.CSS_SELECTOR, "li.option")
+        option = next(
+            (
+                item for item in options
+                if (data_value and item.get_attribute("data-value") == data_value)
+                or item.text.strip() == race_type_value
+            ),
+            None,
+        )
+        if option is None:
+            print(f"⚠️ 找不到賽事類型「{race_type_value}」的選項")
+            return False
+
+        if "open" not in (select_root.get_attribute("class") or ""):
+            driver.execute_script("arguments[0].click();", select_root)
+        driver.execute_script("arguments[0].click();", option)
+        time.sleep(3)
+
+        # 點擊後網站會以 AJAX 重新建立 select，必須重新取得元素再驗證。
+        refreshed_select = wait.until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, 'select[name="raceId"]'))
+        )
+        refreshed_parent = refreshed_select.find_element(By.XPATH, "./..")
+        current_text = refreshed_parent.find_element(
+            By.CSS_SELECTOR, "div.nice-select span.current"
+        ).text.strip()
+        print(f"   ✅ 已切換到：{current_text}")
+        time.sleep(2)
+        return True
+
         # 只鎖定賽事項目的 nice-select.chosen-select
         selects = wait.until(
             EC.presence_of_all_elements_located(
@@ -512,6 +603,32 @@ def click_category_tab(driver: webdriver.Chrome, category_name: str, category_da
     """
     try:
         wait = WebDriverWait(driver, 10)
+
+        # 依 name="group" 鎖定分組選單，能處理任意分組名稱。
+        native_select = wait.until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, 'select[name="group"]'))
+        )
+        parent = native_select.find_element(By.XPATH, "./..")
+        select_root = parent.find_element(By.CSS_SELECTOR, "div.nice-select")
+        options = select_root.find_elements(By.CSS_SELECTOR, "li.option")
+        option = next(
+            (
+                item for item in options
+                if (category_data_value and item.get_attribute("data-value") == category_data_value)
+                or item.text.strip() == category_name
+            ),
+            None,
+        )
+        if option is None:
+            print(f"⚠️ 找不到分組「{category_name}」的選項")
+            return False
+
+        if "open" not in (select_root.get_attribute("class") or ""):
+            driver.execute_script("arguments[0].click();", select_root)
+        driver.execute_script("arguments[0].click();", option)
+        time.sleep(2)
+        print(f"   ✅ 已切換到分組：{category_name}")
+        return True
 
         # 先等所有 nice-select 都出現，再一個一個掃描
         selects = wait.until(
